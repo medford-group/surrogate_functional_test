@@ -1,0 +1,16 @@
+{
+	"database_directory": "/molecule_database",
+	"grid_spacing": 0.02,
+	"box_dimension": 10.0,
+	"number_segment_per_side": 5,
+	"fit_type": "LDA_residual_1M",
+	"NN_setup": {
+		"number_layers": 2,
+		"number_neuron_per_layer": 100,
+		"activation": "relu"
+	},
+
+	"molecule_list": ["C2H2", "C2H4"]
+
+
+}

@@ -93,12 +93,7 @@ def process_one_section(x,y,z,w,x_start,x_end,y_start,y_end,z_start,z_end,out_sh
 
     # Grab quantities on a grid
     rho = np.array(points_func.point_values()["RHO_A"])[:npoints]
-    rho_x = np.array(points_func.point_values()["RHO_AX"])[:npoints]
-    rho_y = np.array(points_func.point_values()["RHO_AY"])[:npoints]
-    rho_z = np.array(points_func.point_values()["RHO_AZ"])[:npoints]
-    gamma = np.array(points_func.point_values()["GAMMA_AA"])[:npoints]
-    tau = np.array(points_func.point_values()["TAU_A"])[:npoints]
-    gradient = rho_x + rho_y + rho_z
+
 
     # Compute our functional
     dft_results = superfunc.compute_functional(points_func.point_values(), -1)
@@ -110,12 +105,8 @@ def process_one_section(x,y,z,w,x_start,x_end,y_start,y_end,z_start,z_end,out_sh
     ret["z"].append(z)
 
     ret["rho"].append(rho)
-    ret["gradient"].append(gradient)
-    ret["gamma"].append(gamma)
-    ret["tau"].append(tau)
 
     ret["epsilon_xc"].append(np.array(dft_results["V"])[:npoints])
-    ret["V_xc"].append(np.array(dft_results["V_RHO_A"])[:npoints])
     
     # Reformat outputs into 3D array format
     map_array = mapping_array(x,y,z,out_shape,x_start,x_end,y_start,y_end,z_start,z_end)
@@ -168,12 +159,16 @@ def process(X0,Y0,Z0,x_inc,y_inc,z_inc,hx,hy,hz,i,j,k ,dv,scf_wfn,scf_e):
     
 def process_system(molecule, molecule_name, xc, h, cell, num_blocks, psi4_options=None):
     cwd = os.getcwd()
+    database_dir_name = "molecule_database"
     dir_name = "{}_{}_{}_{}_{}".format(molecule_name,xc,str(cell).replace('.','-'),str(h).replace('.','-'),num_blocks)
     
-    if os.path.isdir(dir_name) == False:
-        os.makedirs(cwd + '/' + dir_name)
+    if os.path.isdir(database_dir_name) == False:
+        os.makedirs(cwd + '/' + database_dir_name)
+
+    if os.path.isdir(cwd + '/' + database_dir_name + "/" + dir_name) == False:
+        os.makedirs(cwd + '/' + database_dir_name + "/" + dir_name)
     
-    os.chdir(cwd + '/' + dir_name)
+    os.chdir(cwd + '/' + database_dir_name + "/" + dir_name)
     
     if psi4_options == None:
         psi4_options = {"BASIS": "aug-cc-pvtz",
@@ -249,100 +244,47 @@ def read_json_data(data):
 
 
 if __name__ == "__main__":
-    choice = sys.argv[1]
-    
-    if choice not in ['set','single']:
-        raise NotImplementedError
-    
-    if choice == 'set':
-        database_filename = sys.argv[2]
-        list_molecule_filename = sys.argv[3]
-        h = float(sys.argv[4])
-        L = float(sys.argv[5])
-        N = int(sys.argv[6])
-        
-        
-        with open(list_molecule_filename) as f:
-            molecule_names = f.readlines()
-        molecule_names = [x.strip() for x in molecule_names]
-        
-        try:
-            data = json.load(open(database_filename,'rb'))
-        except:
-            with open(database_filename, encoding='utf-8') as f:
-                data=json.load(f)
-        
-        molecules = {}
-        for molecule in molecule_names:
-            if molecule in data:
-                molecules[molecule] = read_json_data(data[molecule])
-                
-            
-        xc_funcs = ['PBE','SVWN','B3LYP','PBE0']
-        all_data = {}
-        
-        def log(log_filename, text):
-            with open(log_filename, "a") as myfile:
-                myfile.write(text)
-            return
-            
-        failed_filename = "failed_molecule.log"
-        succ_filename = "successful_molecule.log"
-    
-        for xc in xc_funcs:
-            for mol in molecules:
-                print('#@!#@!Molecule:'+mol)
-                print('!@#!@#Method:' + xc)
-                filename = '{}_{}.hdf5'.format(mol,xc)
-                if not os.path.exists(filename):
-                    try:
-                        process_system(molecules[mol],mol,xc,h,L,N)
-                    except:
-                        log(failed_filename, '\n' + mol)
 
-        
-        
-    elif choice == 'single':
-        database_filename = sys.argv[2]
-        molecule_name = sys.argv[3]
-        h = float(sys.argv[4])
-        L = float(sys.argv[5])
-        N = int(sys.argv[6])
-        
+    database_filename = sys.argv[1]
+    molecule_name = sys.argv[2]
+    h = float(sys.argv[3])
+    L = float(sys.argv[4])
+    N = int(sys.argv[5])
     
-        molecule_names = [molecule_name]
-        
-        try:
-            data = json.load(open(database_filename,'rb'))
-        except:
-            with open(database_filename, encoding='utf-8') as f:
-                data=json.load(f)
-        
-        molecules = {}
-        for molecule in molecule_names:
-            if molecule in data:
-                molecules[molecule] = read_json_data(data[molecule])
-                
-            
-        xc_funcs = ['B3LYP']#'PBE','SVWN',,'PBE0']
-        all_data = {}
-        
-        def log(log_filename, text):
-            with open(log_filename, "a") as myfile:
-                myfile.write(text)
-            return
-            
-        failed_filename = "failed_molecule.log"
-        succ_filename = "successful_molecule.log"
+
+    molecule_names = [molecule_name]
     
-        for xc in xc_funcs:
-            for mol in molecules:
-                print('#@!#@!Molecule:'+mol)
-                print('!@#!@#Method:' + xc)
-                filename = '{}_{}.hdf5'.format(mol,xc)
-                if not os.path.exists(filename):
-                    try:
-                        process_system(molecules[mol],mol,xc,h,L,N)
-                    except:
-                        log(failed_filename, '\n' + mol)
+    try:
+        data = json.load(open(database_filename,'rb'))
+    except:
+        with open(database_filename, encoding='utf-8') as f:
+            data=json.load(f)
+    
+    molecules = {}
+    for molecule in molecule_names:
+        if molecule in data:
+            molecules[molecule] = read_json_data(data[molecule])
+            
+        
+    xc_funcs = ['B3LYP']#'PBE','SVWN',,'PBE0']
+    all_data = {}
+    
+    def log(log_filename, text):
+        with open(log_filename, "a") as myfile:
+            myfile.write(text)
+        return
+        
+    failed_filename = "failed_molecule.log"
+    succ_filename = "successful_molecule.log"
+
+    for xc in xc_funcs:
+        for mol in molecules:
+            print('#@!#@!Molecule:'+mol)
+            print('!@#!@#Method:' + xc)
+            filename = '{}_{}.hdf5'.format(mol,xc)
+            if not os.path.exists(filename):
+                try:
+                    process_system(molecules[mol],mol,xc,h,L,N)
+                except:
+                    log(failed_filename, '\n' + mol)
 

@@ -1,0 +1,7 @@
+{
+	"grid_spacing": 0.02,
+	"box_dimension": 10.0,
+	"number_segment_per_side": 5,
+	"functionals": "B3LYP",
+	"r_list": [0.02,0.04,0.06,0.08,0.1,0.12,0.14,0.16,0.18,0.2]
+}

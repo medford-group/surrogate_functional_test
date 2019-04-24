@@ -9,11 +9,11 @@ import numpy as np
 import sys
 import math
 
-from convolutions import get_differenciation_conv, get_integration_stencil,get_auto_accuracy,get_fftconv_with_known_stencil_no_wrap
+from convolutions import get_differenciation_conv, get_integration_stencil,get_auto_accuracy,get_fftconv_with_known_stencil_no_wrap,get_asym_integration_stencil,get_asym_integration_fftconv,get_asym_integral_fftconv_with_known_stencil,calc_MC_surface_harmonic_stencil
 import h5py
 import os
 #from joblib import Parallel, delayed
-import multiprocessing
+#import multiprocessing
 import itertools
 import json
 
@@ -44,6 +44,7 @@ def read_system(mol,xc,Nx_center,Ny_center,Nz_center,Nx,Ny,Nz,data_name):
     
     temp_x = None
     x_start = True
+    print Nx_list, Ny_list,Nz_list
     for i in Nx_list:
         
         temp_y = None
@@ -106,6 +107,11 @@ def calculate_ave_density_desc(n,r,hx,hy,hz,stencil,pad):
     ave_density = get_homo_nondimensional_nave(integration, 1.0, r)
     return ave_density, temp_pad
 
+def create_dataset(database, dataset_name, data):
+    if dataset_name not in database.keys():
+        database.create_dataset(dataset_name,data=data)
+    return
+
 
 def process_normal_descriptors(molecule, functional,i,j,k):
     
@@ -113,93 +119,188 @@ def process_normal_descriptors(molecule, functional,i,j,k):
     result_filename = "{}_{}_{}_{}_{}_all_descriptors.hdf5".format(molecule,functional,i,j,k)
     raw_data =  h5py.File(raw_data_filename,'r')
     n = np.asarray(raw_data['rho'])
-    V_xc = np.asarray(raw_data['V_xc'])
     ep_xc =  np.asarray(raw_data['epsilon_xc'])
-    gamma =  np.asarray(raw_data['gamma'])
-    tau =  np.asarray(raw_data['tau'])
+
     raw_data.close()
 
 
-    with h5py.File(result_filename,'a') as data:
-        data.create_dataset('V_xc',data=V_xc)
-        data.create_dataset('epsilon_xc',data=ep_xc)
-        data.create_dataset('rho',data=n)
-        data.create_dataset('gamma',data=gamma)
-        data.create_dataset('tau',data=tau)
+    with h5py.File(result_filename,'a') as database:
+        print 'get normal'
+
+
+        create_dataset(database, 'epsilon_xc', ep_xc)
+        create_dataset(database, 'rho', n)
+
         
     return
 
-def process_range_descriptor(molecule, functional,i,j,k,h,N,r_list,stencil_list,pad_list):
+
+def process_range_descriptor(molecule, functional,i,j,k,h,N,r_list,MCSH_stencil_dict):
+    
     result_filename = "{}_{}_{}_{}_{}_all_descriptors.hdf5".format(molecule,functional,i,j,k)
     Nx = Ny = Nz = N
+#    print 'get range1'
     extented_n = read_system(molecule,functional,i,j,k,Nx,Ny,Nz,'rho')
 
-
+#    print 'get range2'
     with h5py.File(result_filename,'a') as data:
-#        temp_first_deri = np.gradient(extented_n.copy())
-        ave_dens_grp = data.create_group('average_density')
-        derivative_grp = data.create_group('derivative')
-        for index, r in enumerate(r_list):
-            dataset_name = 'average_density_{}'.format(str(r).replace('.','-'))
-            if dataset_name not in ave_dens_grp.keys():
-                temp_data, temp_pad = calculate_ave_density_desc(extented_n.copy(),r,h,h,h,stencil_list[index],pad_list[index])
-                ave_dens_grp.create_dataset(dataset_name,data=carve_out_matrix(temp_data))
 
-                
-        temp_first_deri, temp_pad = get_differenciation_conv(extented_n.copy(), h, h, h, gradient = 'first',
-                                               stencil_type = 'mid', accuracy = '2')
-        temp_sec_deri, temp_pad   = get_differenciation_conv(extented_n.copy(), h, h, h, gradient = 'second',
-                                               stencil_type = 'times2', accuracy = '2')
-#        temp_third_deri, temp_pad = get_differenciation_conv(extented_n.copy(), h, h, h, gradient = 'third',
-#                                               stencil_type = 'times2', accuracy = '2')
-        derivative_grp.create_dataset('derivative_1',data=carve_out_matrix(temp_first_deri))
-        derivative_grp.create_dataset('derivative_2',data=carve_out_matrix(temp_sec_deri))
-#        derivative_grp.create_dataset('derivative_3',data=carve_out_matrix(temp_third_deri))
-        print data.keys()
-        print derivative_grp.keys()
-        print ave_dens_grp.keys()
+        try:
+            MCSH_grp = data['MCSH']
+        except:
+            MCSH_grp = data.create_group('MCSH')
+        print "MCSH"
+
+
+
+        for r in r_list:
+
+            dataset_name = 'MCSH_0_1_{}'.format(str(r).replace('.','-'))
+            if dataset_name not in MCSH_grp.keys():
+                print "start: {} MCSH 0 1 ".format(r)
+                stencils = MCSH_stencil_dict["0_1"][str(r)][0]
+                pad = MCSH_stencil_dict["0_1"][str(r)][1]
+
+                temp_result = np.zeros_like(carve_out_matrix(extented_n.copy()))
+
+                for temp_stencil in stencils:
+                    temp_temp_result_extend,_ = get_fftconv_with_known_stencil_no_wrap(extented_n,h,h,h,1,temp_stencil,0)
+                    temp_temp_result = carve_out_matrix(temp_temp_result_extend)
+                    temp_result = np.add(temp_result, np.square(temp_temp_result))
+
+                temp_result = np.sqrt(temp_result)
+
+                MCSH_grp.create_dataset(dataset_name,data=temp_result)
+
+
+
+            dataset_name = 'MCSH_1_1_{}'.format(str(r).replace('.','-'))
+            if dataset_name not in MCSH_grp.keys():
+                print "start: {} MCSH 1 1 ".format(r)
+                stencils = MCSH_stencil_dict["1_1"][str(r)][0]
+                pad = MCSH_stencil_dict["1_1"][str(r)][1]
+
+                temp_result = np.zeros_like(carve_out_matrix(extented_n.copy()))
+
+                for temp_stencil in stencils:
+                    temp_temp_result_extend,_ = get_fftconv_with_known_stencil_no_wrap(extented_n,h,h,h,1,temp_stencil,0)
+                    temp_temp_result = carve_out_matrix(temp_temp_result_extend)
+                    temp_result = np.add(temp_result, np.square(temp_temp_result))
+
+                temp_result = np.sqrt(temp_result)
+
+                MCSH_grp.create_dataset(dataset_name,data=temp_result)
+
+
+
+
+
+            dataset_name = 'MCSH_2_1_{}'.format(str(r).replace('.','-'))
+            if dataset_name not in MCSH_grp.keys():
+                print "start: {} MCSH 2 1 ".format(r)
+                stencils = MCSH_stencil_dict["2_1"][str(r)][0]
+                pad = MCSH_stencil_dict["2_1"][str(r)][1]
+
+                temp_result = np.zeros_like(carve_out_matrix(extented_n.copy()))
+
+                for temp_stencil in stencils:
+                    temp_temp_result_extend,_ = get_fftconv_with_known_stencil_no_wrap(extented_n,h,h,h,1,temp_stencil,0)
+                    temp_temp_result = carve_out_matrix(temp_temp_result_extend)
+                    temp_result = np.add(temp_result, np.square(temp_temp_result))
+
+                temp_result = np.sqrt(temp_result)
+
+                MCSH_grp.create_dataset(dataset_name,data=temp_result)
+
+            dataset_name = 'MCSH_2_2_{}'.format(str(r).replace('.','-'))
+            if dataset_name not in MCSH_grp.keys():
+                print "start: {} MCSH 2 2 ".format(r)
+                stencils = MCSH_stencil_dict["2_2"][str(r)][0]
+                pad = MCSH_stencil_dict["2_2"][str(r)][1]
+
+                temp_result = np.zeros_like(carve_out_matrix(extented_n.copy()))
+
+                for temp_stencil in stencils:
+                    temp_temp_result_extend,_ = get_fftconv_with_known_stencil_no_wrap(extented_n,h,h,h,1,temp_stencil,0)
+                    temp_temp_result = carve_out_matrix(temp_temp_result_extend)
+                    temp_result = np.add(temp_result, np.square(temp_temp_result))
+
+                temp_result = np.sqrt(temp_result)
+
+                MCSH_grp.create_dataset(dataset_name,data=temp_result)
+
 
         
     return
 
 
-def prepare_integral_stencils(r_list,h):
-    print 'start preparing integral stencils'
-    stencil_list = []
-    pad_list = []
-    for r in r_list:
-        temp_stencil,temp_pad = get_integration_stencil(h, h, h, r, accuracy = get_auto_accuracy(h,h,h, r))
-        stencil_list.append(temp_stencil)
-        pad_list.append(temp_pad)
-    return stencil_list, pad_list
 
-def process(molecule, functional,i,j,k,h,N,r_list,stencil_list,pad_list):
+
+
+
+def prepare_MCSH_stencils(r_list,h):
+
+    MCSH_stencil_dict = {}
+    MCSH_stencil_dict["0_1"] = {}
+    MCSH_stencil_dict["1_1"] = {}
+    MCSH_stencil_dict["2_1"] = {}
+    MCSH_stencil_dict["2_2"] = {}
+
+
+    for r in r_list:
+
+        stencil_Re_0_1, pad =  calc_MC_surface_harmonic_stencil(h, h, h, r, 0, 1, accuracy = 6)
+        MCSH_stencil_dict["0_1"][str(r)] = [[stencil_Re_0_1], pad ]
+
+
+    for r in r_list:
+
+        stencil_Re_1_1, pad =  calc_MC_surface_harmonic_stencil(h, h, h, r, 1, 1, accuracy = 6)
+        stencil_Re_1_2, pad =  calc_MC_surface_harmonic_stencil(h, h, h, r, 1, 1, accuracy = 6)
+        stencil_Re_1_3, pad =  calc_MC_surface_harmonic_stencil(h, h, h, r, 1, 1, accuracy = 6)
+        MCSH_stencil_dict["1_1"][str(r)] = [[stencil_Re_1_1,stencil_Re_1_2,stencil_Re_1_3], pad ]
+
+
+    for r in r_list:
+
+
+        stencil_Re_2_1, pad =  calc_MC_surface_harmonic_stencil(h, h, h, r, 2, 1, accuracy = 6)
+        stencil_Re_2_4, pad =  calc_MC_surface_harmonic_stencil(h, h, h, r, 2, 4, accuracy = 6)
+        stencil_Re_2_6, pad =  calc_MC_surface_harmonic_stencil(h, h, h, r, 2, 6, accuracy = 6)
+        MCSH_stencil_dict["2_1"][str(r)] = [[stencil_Re_2_1,stencil_Re_2_4,stencil_Re_2_6], pad ]
+
+
+        stencil_Re_2_2, pad =  calc_MC_surface_harmonic_stencil(h, h, h, r, 2, 2, accuracy = 6)
+        stencil_Re_2_3, pad =  calc_MC_surface_harmonic_stencil(h, h, h, r, 2, 3, accuracy = 6)
+        stencil_Re_2_5, pad =  calc_MC_surface_harmonic_stencil(h, h, h, r, 2, 5, accuracy = 6)
+        MCSH_stencil_dict["2_2"][str(r)] = [[stencil_Re_2_2,stencil_Re_2_3,stencil_Re_2_5], pad ]
+
+
+    return MCSH_stencil_dict
+
+
+
+def process(molecule, functional,i,j,k,h,N,r_list,MC_surface_harmonic_stencil_dict):
     result_filename = "{}_{}_{}_{}_{}_all_descriptors.hdf5".format(molecule,functional,i,j,k)
-    if os.path.isfile(result_filename) == False:
-        print 'start {} {} {}'.format(i,j,k)
-        process_normal_descriptors(molecule, functional,i,j,k)
-        process_range_descriptor(molecule, functional,i,j,k,h,N,r_list,stencil_list,pad_list)
+    #if os.path.isfile(result_filename) == False:
+    print 'start {} {} {}'.format(i,j,k)
+    process_normal_descriptors(molecule, functional,i,j,k)
+    process_range_descriptor(molecule, functional,i,j,k,h,N,r_list,MC_surface_harmonic_stencil_dict)
     
 
-def process_one_molecule(molecule, functional,h,L,N):
+def process_one_molecule(molecule, functional,h,L,N,r_list):
     cwd = os.getcwd()
+    database_dir_name = "molecule_database"
     dir_name = "{}_{}_{}_{}_{}".format(molecule,functional,str(L).replace('.','-'),str(h).replace('.','-'),N)
     print dir_name
     
-    if os.path.isdir(dir_name) == False:
+    if os.path.isdir(cwd + '/' + database_dir_name + "/" + dir_name) == False:
         print '\n****Error: Cant find the directory! ****\n'
         raise NotImplementedError
     
-    os.chdir(cwd + '/' + dir_name)
-#    r_list = np.linspace(0.05, 0.1, 2)
-#    r_list = [0.01]
-    r_list = [0.01,0.02,0.03,0.04,0.05,0.06,0.08,0.1,0.15,0.2,0.3,0.4,0.5]
-    stencil_list,pad_list = prepare_integral_stencils(r_list,h)
+    os.chdir(cwd + '/' + database_dir_name + "/" + dir_name)
+    MCSH_stencil_dict = prepare_MCSH_stencils(r_list,h)
     
-    num_cores = multiprocessing.cpu_count()
-    print "number of cores: {}".format(num_cores)
-
-#    Parallel(n_jobs=num_cores)(delayed(processInput)(i) for i in inputs)
     
     Nx = Ny = Nz = N
     i_li = range(Nx)
@@ -207,50 +308,39 @@ def process_one_molecule(molecule, functional,h,L,N):
     k_li = range(Nz)
     
     paramlist = list(itertools.product(i_li,j_li,k_li))
-    
-    pool = multiprocessing.Pool()
+
+
+
     for i,j,k in paramlist:
-        pool.apply_async(process, args=(molecule, functional,i,j,k,h,N,r_list,stencil_list,pad_list))
-    pool.close()
-    pool.join()
+        process(molecule, functional,i,j,k,h,N,r_list,MCSH_stencil_dict)
         
-    
+    #process(molecule, functional,0,0,0,h,N,r_list,MCSH_stencil_dict)
     
     os.chdir(cwd)
     return
 
 
 if __name__ == "__main__":
-    choice = sys.argv[1]
-    if choice not in ['single','set']:
-        raise NotImplementedError
-    
-    if choice == 'single':
-        molecule = sys.argv[2]
-        functional = sys.argv[3]
-        h = float(sys.argv[4])
-        L = float(sys.argv[5])
-        N = int(sys.argv[6])
-        functionals = ['B3LYP']#'PBE','PBE0','SVWN',
-        if functional in functionals:
-            process_one_molecule(molecule, functional,h,L,N)
 
-    elif choice == 'set':
-        list_molecule_filename = sys.argv[2]
-        h = float(sys.argv[3])
-        L = float(sys.argv[4])
-        N = int(sys.argv[5])
-        with open(list_molecule_filename) as f:
-            molecule_names = f.readlines()
-        molecule_names = [x.strip() for x in molecule_names]
-        functionals = ['PBE','PBE0','SVWN','B3LYP']
-        for functional in functionals:
-            for molecule in molecule_names:
-                result_filename = "{}_{}_all_descriptors.hdf5".format(molecule,functional)
-                try:
-                    if os.path.isfile(result_filename) == False:
-                        process_one_molecule(molecule, functional,h,L,N)
-                    else:
-                        print result_filename + ' already exist'
-                except:
-                    print "failed: {}\t{}".format(molecule,functional)
+    print "start adding dataset"
+
+    setup_filename = sys.argv[1]
+
+    #with open(setup_filename, encoding='utf-8') as f:
+    with open(setup_filename) as f:
+        setup = json.load(f)
+
+    print setup
+
+    
+    molecule = sys.argv[2]
+    print "start"
+    h = float(setup['grid_spacing'])
+    L = float(setup['box_dimension'])
+    N = int(setup['number_segment_per_side'])
+    functional = setup['functionals']
+    r_list = setup['r_list']
+
+    #for functional in functionals:
+    print "start process molecule"
+    process_one_molecule(molecule, functional,h,L,N,r_list)
